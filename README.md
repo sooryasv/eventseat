@@ -2,6 +2,8 @@
 
 A concurrency-safe event and seat reservation engine. Many people can try to hold the same seat at the same instant; PostgreSQL guarantees exactly one wins, holds expire on a SQL clock, and retried requests never double-book.
 
+**Live demo:** [https://eventseat.sooryasv.me](https://eventseat.sooryasv.me) *(running in showcase mode with `ENABLE_DEMO_TOOLS=true`, seeded events, and simulated checkout; see [docs/runbook.md](docs/runbook.md) for real-deployment settings)*
+
 **Stack:** FastAPI, async SQLAlchemy 2, asyncpg, PostgreSQL 16 (only), Alembic, React 18 + TypeScript (strict), Vite, Tailwind, TanStack Query. One Docker image serves the API and the built SPA from the same origin.
 
 ## What it demonstrates
@@ -96,4 +98,4 @@ Dockerfile · docker-compose.yml · .github/workflows/ci.yml
 
 ## Verification status
 
-Verified locally: lint, strict typing, all 76 tests on Python 3.12 + PostgreSQL 16, frontend type-check/lint/build, multi-stage Docker build (`node:20-slim` + `python:3.12-slim`) with `/healthz` healthcheck, and a full browser walkthrough across Attendee, Organizer, and Admin flows. **Pending:** GitHub Actions CI run and live cloud deployment.
+Verified end-to-end: lint, strict typing, all 76 tests on Python 3.12 + PostgreSQL 16, frontend type-check/lint/build, multi-stage Docker build (`node:20-slim` + `python:3.12-slim`), green GitHub Actions CI (`backend`, `frontend`, `docker`), and live HTTPS deployment at [https://eventseat.sooryasv.me](https://eventseat.sooryasv.me) (Heroku Container Registry + pooled Neon PostgreSQL 16 with `USE_NULL_POOL=true` and `SWEEPER_INTERVAL_SECONDS=3600`), verified on desktop and mobile browsers.
