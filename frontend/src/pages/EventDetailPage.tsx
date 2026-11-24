@@ -40,6 +40,20 @@ export function EventDetailPage() {
     holdKey.current = null;
   }, [userId]);
 
+  const liveSeats = seatMap.data?.seats;
+  useEffect(() => {
+    if (!liveSeats) return;
+    const available = new Set(
+      liveSeats.filter((seat) => seat.status === "AVAILABLE").map((seat) => seat.id),
+    );
+    setSelected((current) => {
+      const next = current.filter((id) => available.has(id));
+      if (next.length === current.length) return current;
+      holdKey.current = null;
+      return next;
+    });
+  }, [liveSeats]);
+
   const activeHold = bookings.data?.holds.find((h) => h.event_id === eventId) ?? null;
   useEffect(() => {
     if (activeHold) setStored(activeHold);
@@ -66,11 +80,13 @@ export function EventDetailPage() {
     },
   });
 
-  const toggle = (seatId: string) =>
+  const toggle = (seatId: string) => {
+    if (hold.error) hold.reset();
     setSelected((current) => {
       if (current.includes(seatId)) return current.filter((id) => id !== seatId);
       return current.length >= MAX_SEATS ? current : [...current, seatId];
     });
+  };
 
   if (seatMap.isLoading) return <Loading label="Loading seat map…" />;
   if (seatMap.error) return <ErrorNote error={seatMap.error} />;

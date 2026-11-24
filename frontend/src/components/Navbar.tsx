@@ -36,15 +36,18 @@ function useSignedIn() {
   };
 }
 
+const EMPTY_FORM = {
+  email: "",
+  password: "",
+  full_name: "",
+  role: "ATTENDEE" as "ATTENDEE" | "ORGANIZER",
+};
+
 function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const signedIn = useSignedIn();
-  const [form, setForm] = useState({
-    email: "",
-    password: "",
-    full_name: "",
-    role: "ATTENDEE" as "ATTENDEE" | "ORGANIZER",
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
   const onSuccess = (user: User) => {
+    setForm(EMPTY_FORM);
     signedIn(user);
     onOpenChange(false);
   };
@@ -53,6 +56,14 @@ function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
     mutationFn: () => api.register(form.email, form.password, form.full_name, form.role),
     onSuccess,
   });
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setForm(EMPTY_FORM);
+      login.reset();
+      register.reset();
+    }
+    onOpenChange(nextOpen);
+  };
   const set = (field: keyof typeof form) => (value: string) =>
     setForm((current) => ({ ...current, [field]: value }));
 
@@ -62,7 +73,7 @@ function AuthDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: b
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Welcome to EventSeat</DialogTitle>
@@ -149,6 +160,7 @@ export function Navbar() {
   const { data: user } = useMe();
   const demoTools = useDemoTools();
   const [authOpen, setAuthOpen] = useState(false);
+  const [authKey, setAuthKey] = useState(0);
 
   const demo = useMutation({
     mutationFn: (persona: Role) => api.demoLogin(persona),
@@ -230,14 +242,20 @@ export function Navbar() {
                   ))}
                 </>
               )}
-              <Button size="sm" onClick={() => setAuthOpen(true)}>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setAuthKey((k) => k + 1);
+                  setAuthOpen(true);
+                }}
+              >
                 Sign in
               </Button>
             </>
           )}
         </div>
       </div>
-      <AuthDialog open={authOpen} onOpenChange={setAuthOpen} />
+      <AuthDialog key={authKey} open={authOpen} onOpenChange={setAuthOpen} />
     </header>
   );
 }
