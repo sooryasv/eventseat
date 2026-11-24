@@ -1,18 +1,40 @@
 # EventSeat
 
+[![CI](https://github.com/sooryasv/eventseat/actions/workflows/ci.yml/badge.svg)](https://github.com/sooryasv/eventseat/actions/workflows/ci.yml)
+
 A concurrency-safe event and seat reservation engine. Many people can try to hold the same seat at the same instant; PostgreSQL guarantees exactly one wins, holds expire on a SQL clock, and retried requests never double-book.
 
-**Live demo:** [https://eventseat.sooryasv.me](https://eventseat.sooryasv.me) *(running in showcase mode with `ENABLE_DEMO_TOOLS=true`, seeded events, and simulated checkout; see [docs/runbook.md](docs/runbook.md) for real-deployment settings)*
+**Live demo:** [https://eventseat.sooryasv.me](https://eventseat.sooryasv.me) *(1-click **Demo Attendee** → open an event → **Run race** for the 20-way hold → **Hold & Confirm** → **Send the same request again** for `Idempotent-Replayed: true`; runs in showcase mode with `ENABLE_DEMO_TOOLS=true`, seeded events, and simulated checkout — see [docs/runbook.md](docs/runbook.md) for real-deployment settings)*
 
 **Stack:** FastAPI, async SQLAlchemy 2, asyncpg, PostgreSQL 16 (only), Alembic, React 18 + TypeScript (strict), Vite, Tailwind, TanStack Query. One Docker image serves the API and the built SPA from the same origin.
+
+![EventSeat live 20-way concurrency race showing 1 winner, 19 conflicts, and 0 double bookings](docs/assets/concurrency-race.png)
+
+<details>
+<summary>More preview: confirmed booking with Idempotent-Replayed verification</summary>
+
+![EventSeat confirmed booking card displaying ticket code and Idempotent replay badge](docs/assets/idempotent-replay.png)
+
+</details>
 
 ## What it demonstrates
 
 - **Race-free seat holds.** A strict lock hierarchy (L1 idempotency advisory, L2 per-user hoarding advisory, L3 event row, L4 seat rows by id, L5 booking rows by id) makes deadlocks structurally impossible. A partial unique index and composite foreign keys back it up at the database level.
 - **A SQL-only clock.** Every expiry decision uses `statement_timestamp()` through one helper, `sql_now()`. `NOW()` is never used because it goes stale after waiting on a lock.
 - **Savepoint-safe idempotency.** `Idempotency-Key` on hold and confirm: replays return the stored response with `Idempotent-Replayed: true`; the same key with a different payload is `409`; server errors (5xx) are never stored.
-- **Lazy plus background expiry.** A hold past `held_until` is treated as free immediately; a sweeper (`SKIP LOCKED`) tidies rows every 60 s.
+- **Lazy plus background expiry.** A hold past `held_until` is treated as free immediately; a sweeper (`SKIP LOCKED`) tidies rows every 60 s by default (`3600 s` on serverless Neon so Postgres scales to zero while lazy expiry frees seats immediately).
 - **A live concurrency demo.** The UI can fire 20 simultaneous holds at one seat and show `201 ×1, 409 ×19, double bookings 0`.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  UI["React 18 SPA<br/>TanStack Query"] -->|same-origin HttpOnly cookie| API["FastAPI API"]
+  API -->|Idempotency-Key| IDEM["Savepoint Idempotency<br/>replay · 409 mismatch · no 5xx store"]
+  IDEM -->|hold / confirm| LOCK["Lock Hierarchy L1–L5<br/>advisory → event → seats → booking"]
+  LOCK --> PG[("PostgreSQL 16<br/>partial unique index · composite FKs<br/>statement_timestamp() clock")]
+  SWEEP["Expiry Sweeper<br/>SKIP LOCKED"] --> PG
+```
 
 Design rationale lives in [docs/DECISIONS.md](docs/DECISIONS.md) (ADR-001..007) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
