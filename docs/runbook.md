@@ -47,7 +47,7 @@ When `ENABLE_DEMO_TOOLS=false` and `RUN_SEED_ON_STARTUP=false`, register a stand
 UPDATE users SET role = 'SUPER_ADMIN' WHERE email = 'admin@example.com';
 ```
 
-Sign out and sign back in so a fresh JWT cookie is issued with the `SUPER_ADMIN` role.
+Refresh the page (or sign out and back in) so the UI reloads the updated `SUPER_ADMIN` role from `/api/v1/auth/me`.
 
 ## Limits to know about
 

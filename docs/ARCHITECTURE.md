@@ -38,24 +38,24 @@ Within one transaction locks are taken in ascending order only; skipping a level
 | Level | Lock | Taken by |
 | --- | --- | --- |
 | L1 | `pg_advisory_xact_lock` on `idem:{user}:{endpoint}:{key}` | hold, confirm |
-| L2 | `pg_advisory_xact_lock` on `hoard:{user}:{event}` | hold |
-| L3 | `events` row: `FOR SHARE` (hold, confirm, cancel-booking), `FOR UPDATE` (cancel-event) | all booking paths |
-| L4 | `seats` rows `ORDER BY id FOR UPDATE` | hold, cancel-event |
-| L5 | `bookings` rows `ORDER BY id FOR UPDATE` | confirm, cancel, sweeper |
+| L2 | `pg_advisory_xact_lock` on `hoard:{user}:{event}` | hold, confirm, cancel-booking |
+| L3 | `events` row: `FOR SHARE` (hold, confirm, cancel-booking), `FOR UPDATE` (cancel-event) | hold, confirm, cancel-booking, cancel-event |
+| L4 | `seats` rows `ORDER BY id FOR UPDATE` | hold, confirm, cancel-booking, cancel-event |
+| L5 | `bookings` rows `ORDER BY id FOR UPDATE` (`SKIP LOCKED` in sweeper) | hold, confirm, cancel-booking, cancel-event, sweeper |
 
-Advisory keys are the first 8 bytes of a domain-prefixed SHA-256, read as a signed 64-bit integer and bound as `BIGINT`. The sweeper takes L5 only and uses `SKIP LOCKED`, so it never waits on a request. See ADR-006.
+Advisory keys are the first 8 bytes of a domain-prefixed SHA-256, read as a signed 64-bit integer and bound as `BIGINT`. The sweeper takes L5 only and uses `SKIP LOCKED` (and also `SKIP LOCKED` when pruning expired idempotency rows), so it never waits on or deadlocks with a live request. See ADR-006.
 
 ## Request flows
 
-**Hold.** Validate input, then L1 (replay or mismatch check), L2 (per-user serialisation), L3 `FOR SHARE`, L4 lock the requested seats in id order, expire stale holds on those seats, check the occupancy predicate and the 4-seat cap, insert the booking and `booking_seats`, store the idempotent result.
+**Hold.** Validate input, then take L1 (prune/replay/mismatch), L2 (per-user serialisation), L3 `FOR SHARE`, L4 requested seats in id order, and L5 conflicting active bookings in id order. In the outer transaction, lazily expire stale holds (`expire_stale_holds`). Inside a savepoint (`begin_nested`), validate event status, cutoff, seat ownership, seat availability, and caps (<= 1 active hold, <= 4 active seats per user/event), insert `bookings` + `booking_seats`, and store the idempotent result (or roll back the savepoint and store deterministic `409` errors).
 
-**Confirm.** Read the booking without locks, return 404 if missing and 403 if it belongs to someone else, then take L1, L3, L5 and re-validate. The `UPDATE` re-checks `held_until > sql_now()`. If the hold has expired it is marked EXPIRED, a `410` is persisted for that key and committed.
+**Confirm.** Read the booking without locks, return 404 if missing and 403 if it belongs to someone else, then take L1, L2, L3 `FOR SHARE`, L4, and L5 and re-validate ownership. If the event is published and the hold has already lapsed, mark it EXPIRED in the outer transaction, persist `410` for that key, and commit. Otherwise open a savepoint, run the `UPDATE` re-checking `held_until > sql_now()`, and store `200` (or roll back the savepoint and store `402`/`409`/`410`).
 
-**Expiry.** Reads treat an expired HELD booking as free immediately. The sweeper converts them to EXPIRED in batches of 100 and prunes old idempotency rows (up to 500, also `SKIP LOCKED`).
+**Expiry.** Reads treat an expired HELD booking as free immediately via `queries.seat_occupied_predicate()`. The sweeper converts lapsed holds to EXPIRED in batches of 100 and prunes old idempotency rows (up to 500, also `SKIP LOCKED`).
 
 ## Idempotency
 
-Hold and confirm require an `Idempotency-Key`. The request hash covers the canonical payload (seat ids sorted, so a reversed order replays). Deterministic outcomes (201, 402, 409, 410) are stored and replayed with `Idempotent-Replayed: true`; 5xx responses are never stored, enforced both in code (`is_persistable`) and by a CHECK on `status_code`. Expired-hold cleanup runs in the outer transaction before the savepoint, so a failed attempt cannot roll back the expiry.
+Hold and confirm require an `Idempotency-Key`. The request hash covers the canonical payload (seat ids sorted, so a reversed order replays). Deterministic outcomes (`2xx` — 200/201 — plus 402, 409, 410) are stored and replayed with `Idempotent-Replayed: true`; 5xx responses are never stored, enforced both in code (`is_persistable`) and by a CHECK on `status_code`. Expired-hold cleanup runs in the outer transaction before the savepoint, so a failed attempt cannot roll back the expiry.
 
 ## Authentication and CSRF
 

@@ -57,5 +57,5 @@ Expected indexes include `uq_booking_seats_active_seat UNIQUE (event_id, seat_id
 ## 7. RBAC
 
 - Register with `role: "SUPER_ADMIN"` returns `422`.
-- Sign in as **Organizer** before verification: Admin console shows "awaiting verification" and creating an event is `403`. As **Admin**, verify the organizer; creating an event then succeeds.
+- Register a new **Organizer** account (via **Create account**): before verification, the Admin console shows "awaiting verification" and creating an event is `403`. As **Admin**, verify that organizer; creating an event then succeeds.
 - Confirming or cancelling another user's booking returns `404` for a missing booking and `403` for someone else's.

@@ -29,11 +29,27 @@ A concurrency-safe event and seat reservation engine. Many people can try to hol
 
 ```mermaid
 flowchart LR
-  UI["React 18 SPA<br/>TanStack Query"] -->|same-origin HttpOnly cookie| API["FastAPI API"]
-  API -->|Idempotency-Key| IDEM["Savepoint Idempotency<br/>replay · 409 mismatch · no 5xx store"]
-  IDEM -->|hold / confirm| LOCK["Lock Hierarchy L1–L5<br/>advisory → event → seats → booking"]
-  LOCK --> PG[("PostgreSQL 16<br/>partial unique index · composite FKs<br/>statement_timestamp() clock")]
-  SWEEP["Expiry Sweeper<br/>SKIP LOCKED"] --> PG
+  UI["React 18 SPA<br/>TanStack Query"] -->|"same origin · HttpOnly SameSite=Lax cookie"| MW
+
+  subgraph APP["Single Docker Container (FastAPI + Built SPA)"]
+    MW["Middleware & Routers<br/>RequestId → OriginGuard CSRF → /api/v1 · /healthz · SPA"]
+    READ["Reads (GET)<br/>unlocked · seat_occupied_predicate() via sql_now()"]
+    HC["Hold & Confirm (POST + Idempotency-Key)<br/>confirm 404/403 pre-lock · L1 replay → L2–L5<br/>outer lazy expire → savepoint write (no 5xx store)"]
+    CANCEL["Cancel Booking / Event (POST)<br/>404/403 pre-lock · L2–L5 / L3–L5 · idempotent"]
+    SIM["20-Way Simulator (POST · Demo Flag)<br/>asyncio.Lock · 20 sessions → hold_seats() · finally release"]
+    SWEEP["Lifespan Sweeper (asyncio task)<br/>L5 holds (100) + idempotency prune (500) · SKIP LOCKED"]
+
+    MW --> READ
+    MW --> HC
+    MW --> CANCEL
+    MW --> SIM
+  end
+
+  READ --> PG[("PostgreSQL 16 (Zero Redis)<br/>advisory locks · uq_booking_seats_active_seat<br/>composite FKs · CHECKs · statement_timestamp()")]
+  HC --> PG
+  CANCEL --> PG
+  SIM --> PG
+  SWEEP --> PG
 ```
 
 Design rationale lives in [docs/DECISIONS.md](docs/DECISIONS.md) (ADR-001..007) and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -114,7 +130,7 @@ Errors use one envelope: `{"error": {"code", "message", "request_id"}}`; the id 
 ```
 backend/   app/ (api, services, models, db, errors, seed) · alembic/ · tests/
 frontend/  src/ (pages, components, lib)
-docs/      SPEC, ARCHITECTURE, DECISIONS, LOCAL_VERIFICATION, runbook
+docs/      SPEC, ARCHITECTURE, DECISIONS, LOCAL_VERIFICATION, runbook, assets/
 Dockerfile · docker-compose.yml · .github/workflows/ci.yml
 ```
 
